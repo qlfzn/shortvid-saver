@@ -1,10 +1,16 @@
-const express = require('express');
-const pool = require('./db');
 require('dotenv').config();
+const express = require('express');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(express.json());
 
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
+
+// simple API-key middleware (your existing logic)
 app.use((req, res, next) => {
   const apiKey = req.headers['x-api-key'];
   if (!apiKey || apiKey !== process.env.API_KEY) {
@@ -13,57 +19,46 @@ app.use((req, res, next) => {
   next();
 });
 
-(async () => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS food_places (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        location TEXT,
-        tags TEXT,
-        link TEXT NOT NULL,
-        date_saved TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    console.log("✅ Table ready");
-  } catch (err) {
-    console.error("❌ Error creating table:", err);
-  }
-})();
-
 // Save a food place
 app.post('/api/save-food', async (req, res) => {
   try {
-    const { name, location, tags, link, date } = req.body;
-    if (!name || !link) {
-      return res.status(400).json({ error: 'Name and link are required' });
-    }
+    const { name, description, location, tags, link, date_to_go } = req.body;
+    if (!name || !link) return res.status(400).json({ error: 'Name and link are required' });
 
-    const result = await pool.query(
-      `INSERT INTO food_places (name, location, tags, link, date_saved)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [name, location, tags, link, date || new Date()]
-    );
+    const { data, error } = await supabase
+      .from('food_places')
+      .insert([{
+        name,
+        description,
+        location,
+        tags,
+        link,
+        date_to_go
+      }]).select();
 
-    res.json({ success: true, place: result.rows[0] });
+    if (error) throw error;
+    res.json({ success: true, place: data[0] });
   } catch (err) {
-    console.error("❌ Error saving food place:", err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('error saving food place:', err);
+    res.status(500).json({ error: err.message || 'Internal server error' });
   }
 });
 
 // Get all food places
 app.get('/api/food', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM food_places ORDER BY date_saved DESC');
-    res.json({ places: result.rows });
+    const { data, error } = await supabase
+      .from('food_places')
+      .select('*')
+      .order('date_to_go', { ascending: false });
+
+    if (error) throw error;
+    res.json({ places: data });
   } catch (err) {
-    console.error("❌ Error fetching data:", err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('error fetching data:', err);
+    res.status(500).json({ error: err.message || 'Internal server error' });
   }
 });
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`🚀 Server running on port ${port}`);
-});
+app.listen(port, () => console.log(`server running on ${port}`));
